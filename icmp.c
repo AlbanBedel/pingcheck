@@ -13,6 +13,7 @@
  * GNU General Public License for more details.
  */
 #include "main.h"
+#include "log.h"
 
 /* keep libc includes before linux headers for musl compatibility */
 #include <netinet/in.h>
@@ -47,7 +48,7 @@ static unsigned short checksum(void* b, int len)
 	return result;
 }
 
-int icmp_init(const char* ifname)
+static int icmp_init(const char* ifname)
 {
 	int ret;
 	pid = getpid();
@@ -75,7 +76,7 @@ int icmp_init(const char* ifname)
 	return fd;
 }
 
-bool icmp_echo_send(int fd, int dst_ip, int cnt)
+static bool icmp_echo_send(int fd, int dst_ip, int cnt)
 {
 	char buf[500];
 	int ret;
@@ -103,7 +104,7 @@ bool icmp_echo_send(int fd, int dst_ip, int cnt)
 	return true;
 }
 
-int icmp_echo_receive(int fd)
+static int icmp_echo_receive(int fd)
 {
 	char buf[500];
 	int ret;
@@ -128,3 +129,48 @@ int icmp_echo_receive(int fd)
 	}
 	return -1;
 }
+
+static bool icmp_ping_init(struct ping_intf* pi)
+{
+	int fd = icmp_init(pi->device);
+	if (fd < 0)
+		return false;
+
+	if (!ping_add_fd(pi, fd, ULOOP_READ)) {
+		close(fd);
+		return false;
+	}
+	return true;
+}
+
+static bool icmp_ping_send(struct ping_intf* pi)
+{
+	if (!ping_has_fd(pi)) {
+		LOG_ERR("ping not init on '%s'", pi->name);
+		return false;
+	}
+	return icmp_echo_send(ping_fd(pi), pi->conf_host, pi->cnt_sent);
+}
+
+static void icmp_ping_recv(struct ping_intf* pi,
+						   __attribute__((unused)) unsigned int events)
+{
+	int recv_fd = ping_fd(pi);
+	int from_fd = icmp_echo_receive(recv_fd);
+
+	if (from_fd < 0)
+		return;
+
+	if (from_fd == recv_fd)
+		ping_received(pi);
+	else
+		ping_received_from(pi, from_fd);
+}
+
+const struct ping_proto icmp_ping_proto = {
+	.name = "icmp",
+	.socktype = SOCK_DGRAM,
+	.init = icmp_ping_init,
+	.send = icmp_ping_send,
+	.recv = icmp_ping_recv,
+};

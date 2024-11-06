@@ -41,7 +41,7 @@ int uci_config_pingcheck(struct ping_intf* intf, int len)
 	int default_interval = 0;
 	int default_timeout = 0;
 	const char* default_hostname = NULL;
-	enum protocol default_proto = ICMP;
+	const char* default_proto = "icmp";
 	int default_tcp_port = 80;
 	int default_panic_to = -1; // don't use
 	bool default_ignore_ubus = false;
@@ -67,9 +67,8 @@ int uci_config_pingcheck(struct ping_intf* intf, int len)
 			default_hostname = uci_lookup_option_string(uci, s, "host");
 			default_panic_to = uci_lookup_option_int(uci, s, "panic");
 			str = uci_lookup_option_string(uci, s, "protocol");
-			if (str != NULL && strcmp(str, "tcp") == 0) {
-				default_proto = TCP;
-			}
+			if (str != NULL)
+				default_proto = str;
 			val = uci_lookup_option_int(uci, s, "tcp_port");
 			if (val > 0) {
 				default_tcp_port = val;
@@ -116,13 +115,10 @@ int uci_config_pingcheck(struct ping_intf* intf, int len)
 						MAX_HOSTNAME_LEN);
 
 			str = uci_lookup_option_string(uci, s, "protocol");
-			if (str != NULL && strcmp(str, "tcp") == 0) {
-				intf[idx].conf_proto = TCP;
-			} else if (str != NULL && strcmp(str, "icmp") == 0) {
-				intf[idx].conf_proto = ICMP;
-			} else {
-				intf[idx].conf_proto = default_proto;
-			}
+			if (str != NULL)
+				strncpy(intf[idx].conf_proto, str, MAX_PROTO_LEN);
+			else
+				strncpy(intf[idx].conf_proto, default_proto, MAX_PROTO_LEN);
 
 			val = uci_lookup_option_int(uci, s, "tcp_port");
 			intf[idx].conf_tcp_port = val > 0 ? val : default_tcp_port;
@@ -146,7 +142,7 @@ int uci_config_pingcheck(struct ping_intf* intf, int len)
 						"%s %s (%d) ignore_ubus %d",
 						intf[idx].name, intf[idx].conf_interval,
 						intf[idx].conf_timeout, intf[idx].conf_hostname,
-						intf[idx].conf_proto == TCP ? "TCP" : "ICMP",
+						intf[idx].conf_proto,
 						intf[idx].conf_tcp_port, intf[idx].conf_ignore_ubus);
 			}
 

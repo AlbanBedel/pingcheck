@@ -13,6 +13,7 @@
  * GNU General Public License for more details.
  */
 #include "main.h"
+#include "log.h"
 
 /* keep libc includes before linux headers for musl compatibility */
 #include <netinet/in.h>
@@ -26,7 +27,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-int tcp_connect(const char* ifname, int dst, int port)
+static int tcp_connect(const char* ifname, int dst, int port)
 {
 	int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (fd == -1) {
@@ -72,10 +73,58 @@ int tcp_connect(const char* ifname, int dst, int port)
 	return fd;
 }
 
-bool tcp_check_connect(int fd)
+static bool tcp_check_connect(int fd)
 {
 	int err;
 	socklen_t len = sizeof(err);
 	getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len);
 	return err == 0;
 }
+
+/* for "ping" using TCP it's enough to just open a connection and see if the
+ * connect fails or succeeds. If the host is unavailable or there is no
+ * connectivity the connect will fail, otherwise it will succeed. This will be
+ * checked in the uloop socket callback above */
+static bool tcp_ping_send(struct ping_intf* pi)
+{
+	if (ping_has_fd(pi)) {
+		// LOG_DBG("TCP connection timed out '%s'", pi->name);
+		ping_close_fd(pi);
+	}
+
+	/* add socket handler to uloop.
+	 * when connect() finishes, select indicates writability */
+	int ret = tcp_connect(pi->device, pi->conf_host, pi->conf_tcp_port);
+	if (ret > 0 && !ping_add_fd(pi, ret, ULOOP_WRITE)) {
+		LOG_ERR("Could not add uloop fd %d for '%s'", ret, pi->name);
+		return false;
+	}
+	return true;
+}
+
+static void tcp_ping_recv(struct ping_intf* pi,
+						  __attribute__((unused)) unsigned int events)
+{
+	/* with TCP, the handler is called when connect() succeds or fails.
+	 *
+	 * if the connect takes longer than the ping interval, it is timed
+	 * out and assumed failed before we open the next regular connection,
+	 * and this handler is not called. but if the interval is large and
+	 * in other cases, this handler can be called for failed connections,
+	 * and to be sure we need to check if connect was successful or not.
+	 *
+	 * after that we just close the socket, as we don't need to send or
+	 * receive any data */
+	bool succ = tcp_check_connect(ping_fd(pi));
+	ping_close_fd(pi);
+	// printf("TCP connected %d\n", succ);
+	if (succ)
+		ping_received(pi);
+}
+
+const struct ping_proto tcp_ping_proto = {
+	.name = "tcp",
+	.socktype = SOCK_STREAM,
+	.send = tcp_ping_send,
+	.recv = tcp_ping_recv,
+};

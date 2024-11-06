@@ -23,45 +23,14 @@
 #include <unistd.h>
 
 /* uloop callback when received something on a ping socket */
-static void ping_fd_handler(struct uloop_fd* fd,
-							__attribute__((unused)) unsigned int events)
+static void ping_fd_handler(struct uloop_fd* fd, unsigned int events)
 {
 	struct ping_intf* pi = container_of(fd, struct ping_intf, ufd);
+	pi->proto->recv(pi, events);
+}
 
-	if (pi->conf_proto == ICMP) {
-		int received_fd = icmp_echo_receive(fd->fd);
-		if (received_fd == -1) {
-			return;
-		} else {
-			if (fd->fd != received_fd) {
-				struct ping_intf* interface = get_interface_by_fd(received_fd);
-				if (interface != NULL) {
-					pi = container_of(&interface->ufd, struct ping_intf, ufd);
-				} else {
-					printf("ICMP echo received for different handle that was not found %d\n", received_fd);
-					return;
-				}
-			}
-		}
-	} else if (pi->conf_proto == TCP) {
-		/* with TCP, the handler is called when connect() succeds or fails.
-		 *
-		 * if the connect takes longer than the ping interval, it is timed
-		 * out and assumed failed before we open the next regular connection,
-		 * and this handler is not called. but if the interval is large and
-		 * in other cases, this handler can be called for failed connections,
-		 * and to be sure we need to check if connect was successful or not.
-		 *
-		 * after that we just close the socket, as we don't need to send or
-		 * receive any data */
-		bool succ = tcp_check_connect(fd->fd);
-		ping_close_fd(pi);
-		// printf("TCP connected %d\n", succ);
-		if (!succ) {
-			return;
-		}
-	}
-
+void ping_received(struct ping_intf* pi)
+{
 	// LOG_DBG("Received pong on '%s'", pi->name);
 	pi->cnt_succ++;
 
@@ -79,6 +48,15 @@ static void ping_fd_handler(struct uloop_fd* fd,
 					  pi->conf_timeout * 1000 + pi->last_rtt * 2);
 
 	state_change(ONLINE, pi);
+}
+
+void ping_received_from(struct ping_intf* pi, int fd)
+{
+	struct ping_intf* other = get_interface_by_fd(fd);
+	if (other)
+		ping_received(other);
+	else
+		LOG_WARN("echo received on '%s' for unknown handler", pi->name);
 }
 
 /* uloop timeout callback when we did not receive a ping reply for a certain
@@ -107,6 +85,12 @@ bool ping_init(struct ping_intf* pi)
 		return true;
 	}
 
+	pi->proto = ping_get_protocol(pi->conf_proto);
+	if (pi->proto == NULL) {
+		LOG_ERR("Ping protocol '%s' not supported", pi->conf_proto);
+		return false;
+	}
+
 	if (!pi->conf_ignore_ubus) {
 		ret = ubus_interface_get_status(pi->name, pi->device, MAX_IFNAME_LEN);
 		if (ret < 0) {
@@ -128,19 +112,13 @@ bool ping_init(struct ping_intf* pi)
 		pi->state = UP;
 	}
 
-	LOG_INF("Init %s ping on '%s' (%s)", pi->conf_proto == TCP ? "TCP" : "ICMP",
+	LOG_INF("Init %s ping on '%s' (%s)", pi->proto->name,
 			pi->name, pi->device);
 
-	/* init ICMP socket. for TCP we open a new socket every time */
-	if (pi->conf_proto == ICMP) {
-		ret = icmp_init(pi->device);
-		if (ret < 0) {
-			return false;
-		}
-
-		/* add socket handler to uloop */
-		if (!ping_add_fd(pi, ret, ULOOP_READ))
-			return false;
+	/* Init the protocol handler */
+	if (pi->proto->init && !pi->proto->init(pi)) {
+		LOG_ERR("Protocol init failed");
+		return false;
 	}
 
 	/* regular sending of ping (start first in 1 sec) */
@@ -224,7 +202,7 @@ static bool ping_resolve(struct ping_intf* pi)
 
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_INET;
-	hints.ai_socktype = pi->conf_proto == ICMP ? SOCK_DGRAM : SOCK_STREAM;
+	hints.ai_socktype = pi->proto->socktype;
 
 	int r = getaddrinfo(pi->conf_hostname, NULL, &hints, &addr);
 	if (r < 0 || addr == NULL) {
@@ -242,27 +220,6 @@ static bool ping_resolve(struct ping_intf* pi)
 	return true;
 }
 
-/* for "ping" using TCP it's enough to just open a connection and see if the
- * connect fails or succeeds. If the host is unavailable or there is no
- * connectivity the connect will fail, otherwise it will succeed. This will be
- * checked in the uloop socket callback above */
-static bool ping_send_tcp(struct ping_intf* pi)
-{
-	if (ping_has_fd(pi)) {
-		// LOG_DBG("TCP connection timed out '%s'", pi->name);
-		ping_close_fd(pi);
-	}
-
-	int ret = tcp_connect(pi->device, pi->conf_host, pi->conf_tcp_port);
-	if (ret > 0) {
-		/* add socket handler to uloop.
-		 * when connect() finishes, select indicates writability */
-		if (!ping_add_fd(pi, ret, ULOOP_WRITE))
-			return false;
-	}
-	return true;
-}
-
 bool ping_send(struct ping_intf* pi)
 {
 	bool ret = false;
@@ -275,15 +232,7 @@ bool ping_send(struct ping_intf* pi)
 	}
 
 	/* either send ICMP ping or start TCP connection */
-	if (pi->conf_proto == ICMP) {
-		if (!ping_has_fd(pi)) {
-			LOG_ERR("ping not init on '%s'", pi->name);
-			return false;
-		}
-		ret = icmp_echo_send(ping_fd(pi), pi->conf_host, pi->cnt_sent);
-	} else if (pi->conf_proto == TCP) {
-		ret = ping_send_tcp(pi);
-	}
+	ret = pi->proto->send(pi);
 
 	/* common code */
 	if (ret) {
@@ -299,5 +248,27 @@ void ping_stop(struct ping_intf* pi)
 {
 	uloop_timeout_cancel(&pi->timeout_offline);
 	uloop_timeout_cancel(&pi->timeout_send);
-	ping_close_fd(pi);
+	if (pi->proto->uninit)
+		pi->proto->uninit(pi);
+	else
+		ping_close_fd(pi);
+}
+
+extern const struct ping_proto icmp_ping_proto;
+extern const struct ping_proto tcp_ping_proto;
+
+static const struct ping_proto* ping_protos[] = {
+	&tcp_ping_proto,
+	&icmp_ping_proto,
+	NULL
+};
+
+const struct ping_proto* ping_get_protocol(const char *name)
+{
+	int i;
+	for (i = 0; ping_protos[i] != NULL; i++) {
+		if (strcmp(name, ping_protos[i]->name) == 0)
+			return ping_protos[i];
+	}
+	return NULL;
 }

@@ -18,6 +18,7 @@
 
 #define MAX_IFNAME_LEN	   256
 #define MAX_HOSTNAME_LEN   256
+#define MAX_PROTO_LEN      16
 #define MAX_NUM_INTERFACES 8
 #define SCRIPTS_TIMEOUT	   10	/* 10 sec */
 #define UBUS_TIMEOUT	   3000 /* 3 sec */
@@ -31,12 +32,19 @@ enum online_state {
 	ONLINE
 };
 
-enum protocol { ICMP, TCP };
-
 struct scripts_proc {
 	struct runqueue_process proc;
 	struct ping_intf* intf;
 	enum online_state state;
+};
+
+struct ping_proto {
+	const char *name;
+	int socktype;
+	bool (*init)(struct ping_intf* pi);
+	void (*uninit)(struct ping_intf* pi);
+	bool (*send)(struct ping_intf* pi);
+	void (*recv)(struct ping_intf* pi, unsigned int events);
 };
 
 struct ping_intf {
@@ -54,17 +62,21 @@ struct ping_intf {
 	int conf_timeout;
 	char conf_hostname[MAX_HOSTNAME_LEN];
 	int conf_host; /* resolved IP */
-	enum protocol conf_proto;
+	char conf_proto[MAX_PROTO_LEN];
 	int conf_tcp_port;
 	int conf_panic_timeout; /* minutes */
 	bool conf_ignore_ubus;
 	bool conf_disabled;
 
 	/* internal state for ping */
+	const struct ping_proto *proto;
 	struct uloop_fd ufd;
 	struct uloop_timeout timeout_offline;
 	struct uloop_timeout timeout_send;
 	struct timespec time_sent;
+
+	/* Storage for protocol specific stuff */
+	void *proto_data;
 
 	/* internal state for scripts */
 	struct scripts_proc scripts_on;
@@ -74,15 +86,6 @@ struct ping_intf {
 // utils.c
 long timespec_diff_ms(struct timespec start, struct timespec end);
 
-// icmp.c
-int icmp_init(const char* ifname);
-bool icmp_echo_send(int fd, int dst, int cnt);
-int icmp_echo_receive(int fd);
-
-// tcp.c
-int tcp_connect(const char* ifname, int dst, int port);
-bool tcp_check_connect(int fd);
-
 // ping.c
 bool ping_init(struct ping_intf* pi);
 int  ping_fd(struct ping_intf* pi);
@@ -90,7 +93,10 @@ bool ping_has_fd(struct ping_intf* pi);
 bool ping_add_fd(struct ping_intf* pi, int fd, unsigned int flags);
 void ping_close_fd(struct ping_intf* pi);
 bool ping_send(struct ping_intf* pi);
+void ping_received(struct ping_intf* pi);
+void ping_received_from(struct ping_intf* pi, int fd);
 void ping_stop(struct ping_intf* pi);
+const struct ping_proto* ping_get_protocol(const char *name);
 
 // ubus.c
 bool ubus_init(void);
