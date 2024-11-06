@@ -20,42 +20,13 @@
 
 #include <err.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <linux/if.h>
-#include <stdio.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 static int tcp_connect(const char* ifname, int dst, int port)
 {
-	int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (fd == -1) {
-		warn("Could not open TCP socket");
+	int fd = open_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP, ifname);
+	if (fd < 0)
 		return -1;
-	}
-
-	/* bind to interface */
-	if (ifname != NULL) {
-		if (strlen(ifname) >= IFNAMSIZ) {
-			fprintf(stderr, "TCP: ifname too long");
-			return -1;
-		}
-		struct ifreq ifr;
-		strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
-		int ret
-			= setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr));
-		if (ret < 0) {
-			warn("TCP: could not bind to '%s'", ifname);
-			close(fd);
-			return -1;
-		}
-	}
-
-	/* make non-blocking */
-	unsigned int fl = fcntl(fd, F_GETFL, 0);
-	fl |= O_NONBLOCK;
-	fcntl(fd, F_SETFL, fl);
 
 	/* connect */
 	struct sockaddr_in addr;

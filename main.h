@@ -85,6 +85,7 @@ struct ping_intf {
 
 // utils.c
 long timespec_diff_ms(struct timespec start, struct timespec end);
+int open_socket(int domain, int type, int protocol, const char *ifname);
 
 // ping.c
 bool ping_init(struct ping_intf* pi);

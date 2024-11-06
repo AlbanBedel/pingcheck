@@ -20,12 +20,7 @@
 
 #include <err.h>
 #include <linux/icmp.h>
-#include <linux/if.h>
 #include <linux/ip.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 static int pid = -1;
 
@@ -50,30 +45,9 @@ static unsigned short checksum(void* b, int len)
 
 static int icmp_init(const char* ifname)
 {
-	int ret;
 	pid = getpid();
 
-	int fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-	if (fd == -1) {
-		warn("Could not open socket");
-		return -1;
-	}
-
-	if (ifname != NULL) {
-		if (strlen(ifname) >= IFNAMSIZ) {
-			fprintf(stderr, "icmp_init: ifname too long");
-			return -1;
-		}
-		struct ifreq ifr;
-		strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
-		ret = setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr));
-		if (ret < 0) {
-			warn("Could not bind to '%s'", ifname);
-			close(fd);
-			return -1;
-		}
-	}
-	return fd;
+	return open_socket(AF_INET, SOCK_RAW, IPPROTO_ICMP, ifname);
 }
 
 static bool icmp_echo_send(int fd, int dst_ip, int cnt)
