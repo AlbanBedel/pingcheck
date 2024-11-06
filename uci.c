@@ -82,7 +82,12 @@ int uci_config_pingcheck(struct ping_intf* intf, int len)
 			if (val > 0) {
 				default_disabled = true;
 			}
-		} else if (strcmp(s->type, "interface") == 0) {
+		}
+	}
+	uci_foreach_element(&p->sections, e)
+	{
+		struct uci_section* s = uci_to_section(e);
+		if (strcmp(s->type, "interface") == 0) {
 			/* interface config, needs at least name */
 			str = uci_lookup_option_string(uci, s, "name");
 			if (str == NULL) {
