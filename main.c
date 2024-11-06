@@ -176,27 +176,27 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) char** argv)
 	ret = uloop_init();
 	if (ret < 0) {
 		LOG_CRIT("Could not initialize uloop");
-		return EXIT_FAILURE;
+		goto close_log;
 	}
 
 	ret = uci_config_pingcheck(intf, MAX_NUM_INTERFACES);
 	if (!ret) {
 		LOG_CRIT("Could not read UCI config");
-		goto exit;
+		goto close_uloop;
 	}
 
 	scripts_init();
 
 	ret = ubus_init();
 	if (!ret) {
-		goto exit;
+		goto close_scripts;
 	}
 
 	/* listen for ubus network interface events */
 	ret = ubus_listen_network_events();
 	if (!ret) {
 		LOG_CRIT("Could not listen to interface events");
-		goto exit;
+		goto close_ubus;
 	}
 
 	ubus_register_server();
@@ -230,10 +230,13 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) char** argv)
 		}
 	}
 
-exit:
-	scripts_finish();
-	uloop_done();
+close_ubus:
 	ubus_finish();
+close_scripts:
+	scripts_finish();
+close_uloop:
+	uloop_done();
+close_log:
 	log_close();
 
 	return ret ? EXIT_SUCCESS : EXIT_FAILURE;
