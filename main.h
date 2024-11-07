@@ -67,6 +67,7 @@ struct ping_intf {
 	int conf_panic_timeout; /* minutes */
 	bool conf_ignore_ubus;
 	bool conf_disabled;
+	bool conf_arp_broadcast;
 
 	/* internal state for ping */
 	const struct ping_proto *proto;

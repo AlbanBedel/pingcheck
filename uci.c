@@ -42,6 +42,7 @@ int uci_config_pingcheck(struct ping_intf* intf, int len)
 	int default_timeout = 0;
 	const char* default_hostname = NULL;
 	const char* default_proto = "icmp";
+	int default_arp_broadcast = 0;
 	int default_tcp_port = 80;
 	int default_panic_to = -1; // don't use
 	bool default_ignore_ubus = false;
@@ -72,6 +73,10 @@ int uci_config_pingcheck(struct ping_intf* intf, int len)
 			val = uci_lookup_option_int(uci, s, "tcp_port");
 			if (val > 0) {
 				default_tcp_port = val;
+			}
+			val = uci_lookup_option_int(uci, s, "arp_broadcast");
+			if (val > 0) {
+				default_arp_broadcast = val;
 			}
 			val = uci_lookup_option_int(uci, s, "ignore_ubus");
 			if (val > 0) {
@@ -122,6 +127,9 @@ int uci_config_pingcheck(struct ping_intf* intf, int len)
 
 			val = uci_lookup_option_int(uci, s, "tcp_port");
 			intf[idx].conf_tcp_port = val > 0 ? val : default_tcp_port;
+
+			val = uci_lookup_option_int(uci, s, "arp_broadcast");
+			intf[idx].conf_arp_broadcast = val > 0 ? val : default_arp_broadcast;
 
 			val = uci_lookup_option_int(uci, s, "ignore_ubus");
 			intf[idx].conf_ignore_ubus = val > 0 ? true : default_ignore_ubus;

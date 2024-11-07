@@ -265,10 +265,12 @@ void ping_stop(struct ping_intf* pi)
 
 extern const struct ping_proto icmp_ping_proto;
 extern const struct ping_proto tcp_ping_proto;
+extern const struct ping_proto arp_ping_proto;
 
 static const struct ping_proto* ping_protos[] = {
 	&tcp_ping_proto,
 	&icmp_ping_proto,
+	&arp_ping_proto,
 	NULL
 };
 
