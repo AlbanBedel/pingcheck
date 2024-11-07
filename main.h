@@ -85,6 +85,10 @@ bool tcp_check_connect(int fd);
 
 // ping.c
 bool ping_init(struct ping_intf* pi);
+int  ping_fd(struct ping_intf* pi);
+bool ping_has_fd(struct ping_intf* pi);
+bool ping_add_fd(struct ping_intf* pi, int fd, unsigned int flags);
+void ping_close_fd(struct ping_intf* pi);
 bool ping_send(struct ping_intf* pi);
 void ping_stop(struct ping_intf* pi);
 

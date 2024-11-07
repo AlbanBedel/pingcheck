@@ -22,15 +22,6 @@
 #include <time.h>
 #include <unistd.h>
 
-static void ping_uloop_fd_close(struct uloop_fd* ufd)
-{
-	if (ufd != NULL && ufd->fd > 0) {
-		uloop_fd_delete(ufd);
-		close(ufd->fd);
-		ufd->fd = 0;
-	}
-}
-
 /* uloop callback when received something on a ping socket */
 static void ping_fd_handler(struct uloop_fd* fd,
 							__attribute__((unused)) unsigned int events)
@@ -64,7 +55,7 @@ static void ping_fd_handler(struct uloop_fd* fd,
 		 * after that we just close the socket, as we don't need to send or
 		 * receive any data */
 		bool succ = tcp_check_connect(fd->fd);
-		ping_uloop_fd_close(fd);
+		ping_close_fd(pi);
 		// printf("TCP connected %d\n", succ);
 		if (!succ) {
 			return;
@@ -148,13 +139,8 @@ bool ping_init(struct ping_intf* pi)
 		}
 
 		/* add socket handler to uloop */
-		pi->ufd.fd = ret;
-		pi->ufd.cb = ping_fd_handler;
-		ret = uloop_fd_add(&pi->ufd, ULOOP_READ);
-		if (ret < 0) {
-			LOG_ERR("Could not add uloop fd %d for '%s'", pi->ufd.fd, pi->name);
+		if (!ping_add_fd(pi, ret, ULOOP_READ))
 			return false;
-		}
 	}
 
 	/* regular sending of ping (start first in 1 sec) */
@@ -188,6 +174,49 @@ bool ping_init(struct ping_intf* pi)
 	return true;
 }
 
+int ping_fd(struct ping_intf* pi)
+{
+	return ping_has_fd(pi) ? pi->ufd.fd : -1;
+}
+
+bool ping_has_fd(struct ping_intf* pi)
+{
+	return pi->ufd.registered;
+}
+
+bool ping_add_fd(struct ping_intf* pi, int fd, unsigned int flags)
+{
+	int ret;
+
+	if (fd < 0) {
+		LOG_ERR("can't register invalid fd for '%s'", pi->name);
+		return false;
+	}
+
+	if (ping_has_fd(pi)) {
+		LOG_ERR("fd already registered for '%s'", pi->name);
+		return false;
+	}
+
+	pi->ufd.fd = fd;
+	pi->ufd.cb = ping_fd_handler;
+	ret = uloop_fd_add(&pi->ufd, flags);
+	if (ret < 0) {
+		LOG_ERR("Could not add uloop fd %d for '%s'", fd, pi->name);
+		return false;
+	}
+	return true;
+}
+
+void ping_close_fd(struct ping_intf* pi)
+{
+	if (ping_has_fd(pi)) {
+		uloop_fd_delete(&pi->ufd);
+		close(pi->ufd.fd);
+		pi->ufd.fd = -1;
+	}
+}
+
 static bool ping_resolve(struct ping_intf* pi)
 {
 	struct addrinfo hints;
@@ -219,22 +248,17 @@ static bool ping_resolve(struct ping_intf* pi)
  * checked in the uloop socket callback above */
 static bool ping_send_tcp(struct ping_intf* pi)
 {
-	if (pi->ufd.fd > 0) {
+	if (ping_has_fd(pi)) {
 		// LOG_DBG("TCP connection timed out '%s'", pi->name);
-		ping_uloop_fd_close(&pi->ufd);
+		ping_close_fd(pi);
 	}
 
 	int ret = tcp_connect(pi->device, pi->conf_host, pi->conf_tcp_port);
 	if (ret > 0) {
 		/* add socket handler to uloop.
 		 * when connect() finishes, select indicates writability */
-		pi->ufd.fd = ret;
-		pi->ufd.cb = ping_fd_handler;
-		ret = uloop_fd_add(&pi->ufd, ULOOP_WRITE);
-		if (ret < 0) {
-			LOG_ERR("Could not add uloop fd %d for '%s'", pi->ufd.fd, pi->name);
+		if (!ping_add_fd(pi, ret, ULOOP_WRITE))
 			return false;
-		}
 	}
 	return true;
 }
@@ -252,11 +276,11 @@ bool ping_send(struct ping_intf* pi)
 
 	/* either send ICMP ping or start TCP connection */
 	if (pi->conf_proto == ICMP) {
-		if (pi->ufd.fd <= 0) {
+		if (!ping_has_fd(pi)) {
 			LOG_ERR("ping not init on '%s'", pi->name);
 			return false;
 		}
-		ret = icmp_echo_send(pi->ufd.fd, pi->conf_host, pi->cnt_sent);
+		ret = icmp_echo_send(ping_fd(pi), pi->conf_host, pi->cnt_sent);
 	} else if (pi->conf_proto == TCP) {
 		ret = ping_send_tcp(pi);
 	}
@@ -275,5 +299,5 @@ void ping_stop(struct ping_intf* pi)
 {
 	uloop_timeout_cancel(&pi->timeout_offline);
 	uloop_timeout_cancel(&pi->timeout_send);
-	ping_uloop_fd_close(&pi->ufd);
+	ping_close_fd(pi);
 }
