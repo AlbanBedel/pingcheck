@@ -94,6 +94,8 @@ bool ping_has_fd(struct ping_intf* pi);
 bool ping_add_fd(struct ping_intf* pi, int fd, unsigned int flags);
 void ping_close_fd(struct ping_intf* pi);
 bool ping_send(struct ping_intf* pi);
+void ping_set_time_sent(struct ping_intf* pi);
+void ping_reschedule_send(struct ping_intf* pi);
 void ping_received(struct ping_intf* pi);
 void ping_received_from(struct ping_intf* pi, int fd);
 void ping_stop(struct ping_intf* pi);

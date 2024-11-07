@@ -72,8 +72,7 @@ static void uto_ping_send_cb(struct uloop_timeout* t)
 {
 	struct ping_intf* pi = container_of(t, struct ping_intf, timeout_send);
 	ping_send(pi);
-	/* re-schedule next sending */
-	uloop_timeout_set(t, pi->conf_interval * 1000);
+	ping_reschedule_send(pi);
 }
 
 bool ping_init(struct ping_intf* pi)
@@ -236,12 +235,22 @@ bool ping_send(struct ping_intf* pi)
 
 	/* common code */
 	if (ret) {
+		ping_set_time_sent(pi);
 		pi->cnt_sent++;
-		clock_gettime(CLOCK_MONOTONIC, &pi->time_sent);
 	} else {
 		LOG_ERR("Could not send ping on '%s'", pi->name);
 	}
 	return ret;
+}
+
+void ping_set_time_sent(struct ping_intf* pi)
+{
+	clock_gettime(CLOCK_MONOTONIC, &pi->time_sent);
+}
+
+void ping_reschedule_send(struct ping_intf* pi)
+{
+	uloop_timeout_set(&pi->timeout_send, pi->conf_interval * 1000);
 }
 
 void ping_stop(struct ping_intf* pi)
